@@ -1,20 +1,28 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Inter, DM_Serif_Display } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const dmSerif = DM_Serif_Display({
+  variable: "--font-dm-serif",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Nwealth Capital — AI Assistant",
-  description: "Nwealth Capital WhatsApp AI chatbot dev workspace",
+  title: "Nwealth Capital — Dashboard",
+  description: "Nwealth Capital WhatsApp AI staff dashboard",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} h-full`}>
+    <html lang="en" className={`${inter.variable} ${dmSerif.variable} h-full`}>
       <body className="h-full">{children}</body>
     </html>
   );

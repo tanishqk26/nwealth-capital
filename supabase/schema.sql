@@ -28,8 +28,15 @@ create table if not exists messages (
   direction        text not null,       -- inbound | outbound
   body             text not null,
   message_type     text default 'text',
+  sender           text default 'bot',  -- bot | agent | customer
   created_at       timestamptz default now()
 );
+
+-- Migration: add sender column if upgrading from earlier schema
+do $$ begin
+  alter table messages add column if not exists sender text default 'bot';
+exception when others then null;
+end $$;
 
 -- ─── leads ─────────────────────────────────────────────────
 create table if not exists leads (
@@ -61,6 +68,10 @@ create table if not exists kb_documents (
 );
 
 alter table kb_documents enable row level security;
+
+-- ─── handoff detail columns (added for dashboard) ─────────
+alter table conversations add column if not exists handoff_reason  text;
+alter table conversations add column if not exists handoff_summary text;
 
 -- ─── indexes ───────────────────────────────────────────────
 create index if not exists idx_conversations_contact on conversations(contact_id);

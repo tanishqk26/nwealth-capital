@@ -94,8 +94,22 @@ function TypingBubble() {
 
 // ─── Name modal ──────────────────────────────────────────────
 
-function NameModal({ onStart, error, loading }: { onStart: (name: string) => void; error?: string; loading?: boolean }) {
+function NameModal({
+  onStart,
+  error,
+  loading,
+}: {
+  onStart: (name: string, phone: string) => void;
+  error?: string;
+  loading?: boolean;
+}) {
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+
+  const phoneDigits = phone.replace(/\D/g, '');
+  const canSubmit = name.trim() && phoneDigits.length >= 10 && !loading;
+  const submit = () => canSubmit && onStart(name.trim(), phone.trim());
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
@@ -108,7 +122,7 @@ function NameModal({ onStart, error, loading }: { onStart: (name: string) => voi
             style={{ backgroundColor: '#0d3b33' }}
           >N</div>
           <p className="font-semibold text-gray-800">Chat with Nwealth Capital</p>
-          <p className="text-xs text-gray-500 mt-1">Enter your name to start</p>
+          <p className="text-xs text-gray-500 mt-1">Enter your details to start</p>
         </div>
         {error && (
           <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: '#fff1f0', color: '#c0392b', border: '1px solid #fca5a5' }}>
@@ -121,14 +135,24 @@ function NameModal({ onStart, error, loading }: { onStart: (name: string) => voi
           placeholder="Your name (e.g. Rahul Sharma)"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && name.trim() && !loading && onStart(name.trim())}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          className="w-full border rounded-xl px-4 py-2.5 text-sm outline-none mb-3 text-gray-900 placeholder-gray-400 bg-white"
+          style={{ borderColor: '#e5e7eb' }}
+          disabled={loading}
+        />
+        <input
+          type="tel"
+          placeholder="Phone number (e.g. +91 98765 43210)"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
           className="w-full border rounded-xl px-4 py-2.5 text-sm outline-none mb-3 text-gray-900 placeholder-gray-400 bg-white"
           style={{ borderColor: '#e5e7eb' }}
           disabled={loading}
         />
         <button
-          onClick={() => name.trim() && !loading && onStart(name.trim())}
-          disabled={!name.trim() || loading}
+          onClick={submit}
+          disabled={!canSubmit}
           className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-40"
           style={{ backgroundColor: '#0d3b33' }}
         >
@@ -171,14 +195,14 @@ export default function ChatPage() {
   }, []);
 
   // ── Create a new session ─────────────────────────────────────
-  const startSession = useCallback(async (name: string) => {
+  const startSession = useCallback(async (name: string, phone: string) => {
     setModalError('');
     setModalLoading(true);
     try {
       const res = await fetch('/api/conversations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, phone }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -327,13 +351,6 @@ export default function ChatPage() {
 
             {/* Actions */}
             <div className="flex items-center gap-1">
-              <Link
-                href="/kb"
-                title="Knowledge Base"
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-base"
-              >
-                📚
-              </Link>
               <button
                 onClick={resetSession}
                 title="New conversation (switch user)"

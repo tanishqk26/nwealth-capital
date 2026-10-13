@@ -2,6 +2,7 @@ import { GoogleGenerativeAI, SchemaType, type Content } from '@google/generative
 import { db, getRecentMessages, type Message } from './supabase';
 import { checkGuardrails } from './guardrails';
 import { searchFAQ } from './rag';
+import { assignLeadToNext } from './team-auth';
 
 const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -33,6 +34,7 @@ TOOLS — use them when appropriate:
 - handoff_to_human: complex, personal, or out-of-scope queries
 - register_event: user wants to attend an investor awareness event
 - record_opt_out: user sends STOP, Unsubscribe, or similar
+- request_cas_statement: client asks for their CAS / portfolio statement — first ask for the period (from date and to date), then call this tool once you have both dates; after the tool returns, share the download_url as a clickable link in your reply
 
 Keep responses concise (2–4 lines). Be warm, helpful, and professional.`;
 
@@ -97,6 +99,18 @@ const TOOLS: any[] = [
         description: 'Record that the user wants to stop receiving messages.',
         parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
       },
+      {
+        name: 'request_cas_statement',
+        description: 'Generate and send a sample CAS (Consolidated Account Statement) PDF when the client asks for their portfolio statement. Call this only after collecting both from_date and to_date from the client.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            from_date: { type: SchemaType.STRING, description: 'Start date of statement period (YYYY-MM-DD or DD-MM-YYYY)' },
+            to_date:   { type: SchemaType.STRING, description: 'End date of statement period (YYYY-MM-DD or DD-MM-YYYY)' },
+          },
+          required: ['from_date', 'to_date'],
+        },
+      },
     ],
   },
 ];
@@ -110,29 +124,47 @@ async function executeTool(
 ): Promise<Record<string, unknown>> {
   try {
     switch (name) {
-      case 'create_lead':
-        await db.from('leads').insert({
+      case 'create_lead': {
+        const { data: newLead } = await db.from('leads').insert({
           contact_id: contactId,
           conversation_id: conversationId,
           intent: args.intent,
           amount_range: args.amount_range ?? null,
           callback_time: args.callback_time ?? null,
           status: 'new',
-        });
+        }).select('id').single();
+        if (newLead) {
+          const assignedTo = await assignLeadToNext();
+          if (assignedTo) {
+            await db.from('leads').update({ assigned_to: assignedTo }).eq('id', newLead.id);
+          }
+        }
         return { success: true, message: 'Lead captured' };
+      }
 
-      case 'request_callback':
-        await db.from('leads').insert({
+      case 'request_callback': {
+        const { data: cbLead } = await db.from('leads').insert({
           contact_id: contactId,
           conversation_id: conversationId,
           intent: 'callback',
           callback_time: args.time_preference,
           status: 'new',
-        });
+        }).select('id').single();
+        if (cbLead) {
+          const assignedTo = await assignLeadToNext();
+          if (assignedTo) {
+            await db.from('leads').update({ assigned_to: assignedTo }).eq('id', cbLead.id);
+          }
+        }
         return { success: true, message: 'Callback scheduled' };
+      }
 
       case 'handoff_to_human':
-        await db.from('conversations').update({ status: 'handoff' }).eq('id', conversationId);
+        await db.from('conversations').update({
+          status: 'handoff',
+          handoff_reason: args.reason ?? null,
+          handoff_summary: args.summary ?? null,
+        }).eq('id', conversationId);
         return { success: true, message: 'Conversation flagged for human handoff' };
 
       case 'register_event':
@@ -148,6 +180,18 @@ async function executeTool(
         // Simple implementation — extend with an opt_outs table later
         await db.from('conversations').update({ status: 'closed' }).eq('id', conversationId);
         return { success: true, message: 'Opt-out recorded' };
+
+      case 'request_cas_statement': {
+        const from = args.from_date ?? '';
+        const to   = args.to_date ?? '';
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+        const url = `${appUrl}/api/cas/statement?contact_id=${encodeURIComponent(contactId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+        return {
+          success: true,
+          download_url: url,
+          message: `CAS statement ready for download`,
+        };
+      }
 
       default:
         return { success: false, message: `Unknown tool: ${name}` };

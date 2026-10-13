@@ -63,16 +63,8 @@ export async function POST(request: NextRequest) {
     const resolvedContactId = contactId ?? contact.id;
 
     // ── Store inbound message ──────────────────────────────────
-    const inboundMsg = await saveMessage(resolvedConversationId, 'inbound', text);
-
-    // Emit to SSE so UI can show the echoed message immediately
-    emit(resolvedConversationId, {
-      type: 'message',
-      direction: 'inbound',
-      id: inboundMsg.id,
-      body: text,
-      created_at: inboundMsg.created_at,
-    });
+    await saveMessage(resolvedConversationId, 'inbound', text);
+    // Note: inbound message is already shown optimistically by the chat UI — don't SSE it again.
 
     // ── Signal bot is typing ───────────────────────────────────
     emit(resolvedConversationId, { type: 'typing' });
