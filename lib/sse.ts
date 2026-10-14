@@ -10,7 +10,7 @@ export default sseEmitter;
 export type SSEEvent =
   | { type: 'connected' }
   | { type: 'typing' }
-  | { type: 'message'; direction: 'inbound' | 'outbound'; id: string; body: string; created_at: string }
+  | { type: 'message'; direction: 'inbound' | 'outbound'; id: string; body: string; created_at: string; sender?: string }
   | { type: 'status'; status: string };
 
 export function emit(conversationId: string, event: SSEEvent) {

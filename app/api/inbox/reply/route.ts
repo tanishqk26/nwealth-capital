@@ -44,7 +44,14 @@ export async function POST(request: NextRequest) {
     .eq('id', conversationId);
 
   // Emit SSE so inbox updates live
-  emit(conversationId, { type: 'message', message: data });
+  emit(conversationId, {
+    type: 'message',
+    direction: 'outbound',
+    id: data.id,
+    body: data.body,
+    created_at: data.created_at,
+    sender: 'agent',
+  });
 
   return NextResponse.json(data);
 }

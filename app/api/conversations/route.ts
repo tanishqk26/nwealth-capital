@@ -30,9 +30,14 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Attach last message preview
+  // Attach last message preview (staff assistant chats excluded)
+  const customerConvs = (data ?? []).filter((c) => {
+    const contact = c.contact as { type?: string } | { type?: string }[] | null;
+    const t = Array.isArray(contact) ? contact[0]?.type : contact?.type;
+    return t !== 'staff';
+  });
   const withPreviews = await Promise.all(
-    (data ?? []).map(async (conv) => {
+    customerConvs.map(async (conv) => {
       const { data: msgs } = await db
         .from('messages')
         .select('body, direction, created_at')

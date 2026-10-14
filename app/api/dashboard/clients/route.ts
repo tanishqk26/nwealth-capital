@@ -34,7 +34,7 @@ export async function GET() {
     if (contactIds.length === 0) return NextResponse.json([]);
   }
 
-  let query = db.from('contacts').select('*').order('created_at', { ascending: false });
+  let query = db.from('contacts').select('*').neq('type', 'staff').order('created_at', { ascending: false });
   if (contactIds) query = query.in('id', contactIds);
 
   const { data, error } = await query;

@@ -240,10 +240,12 @@ function InboxContent() {
     es.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data);
-        if (ev.type === 'message' && ev.message) {
+        if (ev.type === 'message') {
+          // SSE events are flat ({id, direction, body, created_at, sender?}); bot replies carry no sender
+          const incoming = ev.message ?? { ...ev, sender: ev.sender ?? (ev.direction === 'outbound' ? 'bot' : 'customer') };
           setMessages((prev) => {
-            if (prev.some((m) => m.id === ev.message.id)) return prev;
-            return [...prev, ev.message];
+            if (prev.some((m) => m.id === incoming.id)) return prev;
+            return [...prev, incoming];
           });
           // Refresh conv list to update preview
           loadConvs();

@@ -5,14 +5,16 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/supabase';
 
 export async function GET() {
-  const { data: conversations, error } = await db
+  const { data: allConversations, error } = await db
     .from('conversations')
-    .select('*, contacts(id, name, phone)')
+    .select('*, contacts(id, name, phone, type)')
     .order('last_message_at', { ascending: false })
     .limit(200);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // staff assistant chats are not customer conversations
+  const conversations = allConversations?.filter((c) => (c.contacts as { type?: string } | null)?.type !== 'staff');
   const ids = conversations?.map((c) => c.id) ?? [];
   if (ids.length === 0) return NextResponse.json([]);
 

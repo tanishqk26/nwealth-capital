@@ -3,6 +3,7 @@ import { db, getRecentMessages, type Message } from './supabase';
 import { checkGuardrails } from './guardrails';
 import { searchFAQ } from './rag';
 import { assignLeadToNext } from './team-auth';
+import { createTask, istContextString, slotToDueAt, TASK_TYPES, type TaskType } from './tasks';
 
 const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -34,6 +35,7 @@ TOOLS — use them when appropriate:
 - handoff_to_human: complex, personal, or out-of-scope queries
 - register_event: user wants to attend an investor awareness event
 - record_opt_out: user sends STOP, Unsubscribe, or similar
+- create_task: a human on the team must do something for this client (call back at a time, review portfolio, fix a failed SIP, help with KYC/documents, resolve a complaint). Give a clear title, the best-fit type, and due_at only if the client gave a day/time. Use it in addition to handoff_to_human when the client needs follow-up
 - request_cas_statement: client asks for their CAS / portfolio statement — first ask for the period (from date and to date), then call this tool once you have both dates; after the tool returns, share the download_url as a clickable link in your reply
 
 Keep responses concise (2–4 lines). Be warm, helpful, and professional.`;
@@ -100,6 +102,21 @@ const TOOLS: any[] = [
         parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
       },
       {
+        name: 'create_task',
+        description: 'Create a follow-up task for the Nwealth team about this client. Use when a human must act: callback, portfolio review, failed SIP / mandate issue, KYC or document help, complaint, or any promised follow-up.',
+        parameters: {
+          type: SchemaType.OBJECT,
+          properties: {
+            title: { type: SchemaType.STRING, description: 'Short imperative title for the salesperson, e.g. "Call back about SIP bounce"' },
+            type: { type: SchemaType.STRING, description: `One of: ${TASK_TYPES.join(', ')}` },
+            due_at: { type: SchemaType.STRING, description: 'ISO-8601 datetime with +05:30 offset if the client specified when; omit otherwise' },
+            priority: { type: SchemaType.STRING, description: 'low | normal | high (high for complaints, failed debits, urgent requests)' },
+            details: { type: SchemaType.STRING, description: 'Context the salesperson needs (what the client said)' },
+          },
+          required: ['title', 'type'],
+        },
+      },
+      {
         name: 'request_cas_statement',
         description: 'Generate and send a sample CAS (Consolidated Account Statement) PDF when the client asks for their portfolio statement. Call this only after collecting both from_date and to_date from the client.',
         parameters: {
@@ -114,6 +131,24 @@ const TOOLS: any[] = [
     ],
   },
 ];
+
+// Assignee resolution for bot-created tasks: reuse the lead's owner, then the contact's latest owner, then round-robin.
+async function leadAssignee(leadId?: string | null): Promise<string | null> {
+  if (!leadId) return assignLeadToNext();
+  const { data } = await db.from('leads').select('assigned_to').eq('id', leadId).single();
+  return data?.assigned_to ?? (await assignLeadToNext());
+}
+
+async function contactAssignee(contactId: string): Promise<string | null> {
+  const { data } = await db
+    .from('leads')
+    .select('assigned_to')
+    .eq('contact_id', contactId)
+    .not('assigned_to', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  return data?.[0]?.assigned_to ?? (await assignLeadToNext());
+}
 
 // ─── Tool executor ──────────────────────────────────────────
 async function executeTool(
@@ -156,6 +191,16 @@ async function executeTool(
             await db.from('leads').update({ assigned_to: assignedTo }).eq('id', cbLead.id);
           }
         }
+        await createTask({
+          title: 'Call back client',
+          description: args.time_preference ? `Preferred time: ${args.time_preference}` : null,
+          type: 'callback',
+          due_at: slotToDueAt(args.time_preference),
+          contact_id: contactId,
+          lead_id: cbLead?.id ?? null,
+          conversation_id: conversationId,
+          assignee_id: await leadAssignee(cbLead?.id),
+        });
         return { success: true, message: 'Callback scheduled' };
       }
 
@@ -167,14 +212,42 @@ async function executeTool(
         }).eq('id', conversationId);
         return { success: true, message: 'Conversation flagged for human handoff' };
 
-      case 'register_event':
-        await db.from('leads').insert({
+      case 'register_event': {
+        const { data: evLead } = await db.from('leads').insert({
           contact_id: contactId,
           conversation_id: conversationId,
           intent: `event_registration: ${args.society ?? 'unknown society'}`,
           status: 'new',
+        }).select('id').single();
+        await createTask({
+          title: `Event follow-up${args.society ? ` — ${args.society}` : ''}`,
+          type: 'event_followup',
+          contact_id: contactId,
+          lead_id: evLead?.id ?? null,
+          conversation_id: conversationId,
+          assignee_id: await leadAssignee(evLead?.id),
         });
         return { success: true, message: 'Event registration noted' };
+      }
+
+      case 'create_task': {
+        let dueAt: string | null = null;
+        if (args.due_at) {
+          const t = new Date(args.due_at);
+          if (!isNaN(t.getTime())) dueAt = t.toISOString();
+        }
+        const { task, duplicate } = await createTask({
+          title: args.title ?? 'Follow up with client',
+          description: args.details ?? null,
+          type: (args.type as TaskType) ?? 'follow_up',
+          priority: args.priority as never,
+          due_at: dueAt,
+          contact_id: contactId,
+          conversation_id: conversationId,
+          assignee_id: await contactAssignee(contactId),
+        });
+        return { success: true, message: duplicate ? 'A similar task is already open for the team' : 'Task created for the team', task_id: task.id };
+      }
 
       case 'record_opt_out':
         // Simple implementation — extend with an opt_outs table later
@@ -247,7 +320,7 @@ export async function processMessage(
   // 4. Call Gemini
   const model = genai.getGenerativeModel({
     model: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
-    systemInstruction: SYSTEM_PROMPT,
+    systemInstruction: `${SYSTEM_PROMPT}\n\nCurrent date/time: ${istContextString()}. Resolve words like "tomorrow"/"kal" against this when setting due_at.`,
     tools: TOOLS,
   });
 

@@ -36,7 +36,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Dashboard routes require auth
-  if (pathname.startsWith('/dashboard')) {
+  if (pathname.startsWith('/dashboard') || pathname.startsWith('/assistant')) {
     if (!isAuthenticated) {
       const url = new URL('/login', request.url);
       url.searchParams.set('from', pathname);
@@ -60,5 +60,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/login', '/dashboard/:path*', '/api/:path*'],
+  matcher: ['/login', '/dashboard/:path*', '/assistant/:path*', '/api/:path*'],
 };

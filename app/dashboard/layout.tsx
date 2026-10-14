@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   IconHome, IconUsers, IconUser, IconMessage,
-  IconBook, IconLogOut, IconExternalLink, IconTrendingUp, IconInbox,
+  IconBook, IconLogOut, IconExternalLink, IconTrendingUp, IconInbox, IconCheck,
 } from '@/app/dashboard/components/Icons';
 import { apiFetch } from '@/lib/fetch';
 
@@ -14,8 +14,10 @@ type NavItem = { href: string; label: string; icon: React.ReactNode; exact?: boo
 const NAV: NavItem[] = [
   { href: '/dashboard',               label: 'Overview',       icon: <IconHome />,         exact: true },
   { href: '/dashboard/leads',         label: 'Leads & CRM',    icon: <IconTrendingUp /> },
+  { href: '/dashboard/tasks',         label: 'Tasks',          icon: <IconCheck /> },
   { href: '/dashboard/clients',       label: 'Clients',        icon: <IconUser /> },
   { href: '/dashboard/conversations', label: 'Conversations',  icon: <IconMessage /> },
+  { href: '/assistant',              label: 'My Assistant',   icon: <IconMessage />,      external: true },
   { href: '/inbox',                   label: 'WA Inbox',       icon: <IconInbox />,        external: true },
   { href: '/dashboard/kb',            label: 'Knowledge Base', icon: <IconBook /> },
   { href: '/dashboard/team',          label: 'Team',           icon: <IconUsers />, adminOnly: true },
@@ -28,6 +30,7 @@ function Sidebar() {
   const router = useRouter();
   const [auth, setAuth] = useState<AuthInfo>(null);
   const [handoffCount, setHandoffCount] = useState(0);
+  const [taskCount, setTaskCount] = useState(0);
 
   useEffect(() => {
     apiFetch('/api/auth/me')
@@ -45,8 +48,18 @@ function Sidebar() {
         })
         .catch(() => {});
     };
+    const loadTasks = () => {
+      fetch('/api/dashboard/tasks?status=open')
+        .then((r) => (r.ok ? r.json() : []))
+        .then((data: Array<{ due_at: string | null }>) => {
+          const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+          setTaskCount((data ?? []).filter((t) => t.due_at && new Date(t.due_at) <= endOfToday).length);
+        })
+        .catch(() => {});
+    };
     load();
-    const interval = setInterval(load, 30000);
+    loadTasks();
+    const interval = setInterval(() => { load(); loadTasks(); }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -80,6 +93,7 @@ function Sidebar() {
         {visibleNav.map(({ href, label, icon, exact, external }) => {
           const active = exact ? pathname === href : pathname.startsWith(href);
           const isInbox = href === '/inbox';
+          const isTasks = href === '/dashboard/tasks';
           return (
             <Link
               key={href}
@@ -102,6 +116,14 @@ function Sidebar() {
                   style={{ backgroundColor: '#f59e0b', minWidth: 18, textAlign: 'center' }}
                 >
                   {handoffCount}
+                </span>
+              )}
+              {isTasks && taskCount > 0 && (
+                <span
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white flex-shrink-0"
+                  style={{ backgroundColor: '#ef4444', minWidth: 18, textAlign: 'center' }}
+                >
+                  {taskCount}
                 </span>
               )}
             </Link>
